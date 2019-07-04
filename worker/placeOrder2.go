@@ -13,12 +13,12 @@ import (
 	"github.com/zeebe-io/zeebe/clients/go/worker"
 )
 
-// ProviceDetailsWorker place order
-func ProviceDetailsWorker(client worker.JobClient, job entities.Job) {
+// PlaceOrderWorker place order
+func PlaceOrderWorker(client worker.JobClient, job entities.Job) {
 	processID := "manufacturer"
 	IESMID := "2"
 	jobKey := job.GetKey()
-	log.Println("Start place order " + strconv.Itoa(int(jobKey)))
+	log.Println("Start place2 order " + strconv.Itoa(int(jobKey)))
 
 	payload, err := job.GetVariablesAsMap()
 	if err != nil {
@@ -49,7 +49,7 @@ func ProviceDetailsWorker(client worker.JobClient, job entities.Job) {
 				},
 				To: types.FromToData{
 					ProcessID:         "middleman",
-					ProcessInstanceID: payload["fromProcessInstanceID"].(map[string]string)["middleman"],
+					ProcessInstanceID: "-1",
 					IESMID:            "1",
 				},
 			},
@@ -99,10 +99,10 @@ func ProviceDetailsWorker(client worker.JobClient, job entities.Job) {
 		}
 		switch structMsg["$class"].(string) {
 		case "org.sysu.wf.PIISCreatedEvent":
-			if ok, err := publishPIIS(structMsg["id"].(string), &newIM, "middleman", c); err != nil {
-				lib.FailJob(client, job)
-				return
+			if ok, err := PublishPIIS(structMsg["id"].(string), &newIM, "middleman"); err != nil {
+				continue
 			} else if ok {
+				payload["fromProcessInstanceID"].(map[string]interface{})["middleman"] = newIM.Payload.WorkflowRelevantData.To.ProcessInstanceID
 				finished = true
 				break
 			}

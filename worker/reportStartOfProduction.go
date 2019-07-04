@@ -13,12 +13,12 @@ import (
 	"github.com/zeebe-io/zeebe/clients/go/worker"
 )
 
-// ProvideWaybillWorker place order
-func ProvideWaybillWorker(client worker.JobClient, job entities.Job) {
+// ReportStartOfProductionWorker place order
+func ReportStartOfProductionWorker(client worker.JobClient, job entities.Job) {
 	processID := "manufacturer"
 	IESMID := "4"
 	jobKey := job.GetKey()
-	log.Println("Start place order " + strconv.Itoa(int(jobKey)))
+	log.Println("Start report order " + strconv.Itoa(int(jobKey)))
 
 	payload, err := job.GetVariablesAsMap()
 	if err != nil {
@@ -49,7 +49,7 @@ func ProvideWaybillWorker(client worker.JobClient, job entities.Job) {
 				},
 				To: types.FromToData{
 					ProcessID:         "bulk-buyer",
-					ProcessInstanceID: payload["fromProcessInstanceID"].(map[string]string)["bulk-buyer"],
+					ProcessInstanceID: payload["fromProcessInstanceID"].(map[string]interface{})["bulk-buyer"].(string),
 					IESMID:            "2",
 				},
 			},
@@ -99,9 +99,8 @@ func ProvideWaybillWorker(client worker.JobClient, job entities.Job) {
 		}
 		switch structMsg["$class"].(string) {
 		case "org.sysu.wf.PIISCreatedEvent":
-			if ok, err := publishPIIS(structMsg["id"].(string), &newIM, "bulk-buyer", c); err != nil {
-				lib.FailJob(client, job)
-				return
+			if ok, err := PublishPIIS(structMsg["id"].(string), &newIM, "bulk-buyer"); err != nil {
+				continue
 			} else if ok {
 				finished = true
 				break

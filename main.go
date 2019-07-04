@@ -4,12 +4,13 @@ import (
 	"encoding/json"
 	"log"
 	"net/url"
+	"os"
 
 	"github.com/gorilla/websocket"
+	"github.com/workflow-interoperability/manufacturer/lib"
+	"github.com/workflow-interoperability/manufacturer/types"
 	"github.com/workflow-interoperability/manufacturer/worker"
-	"github.com/workflow-interoperability/samples/worker/services"
 	"github.com/zeebe-io/zeebe/clients/go/zbc"
-	"gitlab.com/go-online/public-service/tools"
 )
 
 const brokerAddr = "127.0.0.1:26500"
@@ -27,7 +28,7 @@ func main() {
 
 	// define worker
 	go func() {
-		placeOrderWorker := client.NewJobWorker().JobType("placeOrder").Handler(worker.PlaceOrderWorker).Open()
+		placeOrderWorker := client.NewJobWorker().JobType("placeOrder2").Handler(worker.PlaceOrderWorker).Open()
 		defer placeOrderWorker.Close()
 		placeOrderWorker.AwaitClose()
 	}()
@@ -41,12 +42,14 @@ func main() {
 		defer reportStartOfProductionWorker.Close()
 		reportStartOfProductionWorker.AwaitClose()
 	}()
-	deliverProductWorker := client.NewJobWorker().JobType("deliverProduct").Handler(worker.DeliverProductWorker).Open()
-	defer deliverProductWorker.Close()
-	deliverProductWorker.AwaitClose()
+	go func() {
+		deliverProductWorker := client.NewJobWorker().JobType("deliverProduct").Handler(worker.DeliverProductWorker).Open()
+		defer deliverProductWorker.Close()
+		deliverProductWorker.AwaitClose()
+	}()
 
 	// listen to blockchain event
-	u := url.URL{Scheme: "ws", Host: "127.0.0.1:3002", Path: ""}
+	u := url.URL{Scheme: "ws", Host: "127.0.0.1:3000", Path: ""}
 	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	if err != nil {
 		log.Println(err)
@@ -80,14 +83,41 @@ func main() {
 
 func createSellerWorkflowInstance(imID, processID, iermID string, client zbc.ZBClient) {
 	// get im
-	imData, err := services.GetIM("http://127.0.0.1:3002/api/IM/" + imID)
+	imData, err := lib.GetIM("http://127.0.0.1:3001/api/IM/" + imID)
 	if err != nil {
-		log.Println(err)
 		return
 	}
 	if !(imData.Payload.WorkflowRelevantData.To.ProcessID == processID && imData.Payload.WorkflowRelevantData.To.IESMID == iermID) {
 		return
 	}
+
+	// create piis
+	id := lib.GenerateXID()
+	newPIIS := types.PIIS{
+		ID: id,
+		From: types.FromToData{
+			ProcessID:         processID,
+			ProcessInstanceID: id,
+			IESMID:            iesmid,
+		},
+		To: imData.Payload.WorkflowRelevantData.From,
+		SubscriberInformation: types.SubscriberInformation{
+			Roles: []string{},
+			ID:    "bulk-buyer",
+		},
+	}
+	pPIIS := types.PublishPIIS{newPIIS}
+	body, err := json.Marshal(&pPIIS)
+	if err != nil {
+		log.Println(err)
+		os.Exit(1)
+	}
+	err = lib.BlockchainTransaction("http://127.0.0.1:3001/api/PublishPIIS", string(body))
+	if err != nil {
+		log.Println(err)
+		os.Exit(1)
+	}
+	log.Println("Publish PIIS success")
 
 	// publish blockchain asset
 	var data map[string]interface{}
@@ -98,8 +128,9 @@ func createSellerWorkflowInstance(imID, processID, iermID string, client zbc.ZBC
 			return
 		}
 	}
-	data["fromProcessInstanceID"].(map[string]string)["middleman"] = imData.Payload.WorkflowRelevantData.From.ProcessInstanceID
-	data["processInstanceID"] = tools.GenerateXID()
+	data["fromProcessInstanceID"] = map[string]string{}
+	data["fromProcessInstanceID"].(map[string]string)["bulk-buyer"] = imData.Payload.WorkflowRelevantData.From.ProcessInstanceID
+	data["processInstanceID"] = id
 
 	// add workflow instance
 	request, err := client.NewCreateInstanceCommand().BPMNProcessId(processID).LatestVersion().VariablesFromMap(data)
@@ -107,10 +138,5 @@ func createSellerWorkflowInstance(imID, processID, iermID string, client zbc.ZBC
 		log.Println(err)
 		return
 	}
-	msg, err := request.Send()
-	if err != nil {
-		log.Println(err)
-		return
-	}
-	log.Println(msg.String())
+	request.Send()
 }

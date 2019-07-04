@@ -2,7 +2,6 @@ package worker
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/url"
 	"strconv"
@@ -19,7 +18,7 @@ func ReceiveOrder2Worker(client worker.JobClient, job entities.Job) {
 	processID := "manufacturer"
 	iesmid := "3"
 	jobKey := job.GetKey()
-	log.Println("Start sign order " + strconv.Itoa(int(jobKey)))
+	log.Println("Start receive order " + strconv.Itoa(int(jobKey)))
 	payload, err := job.GetVariablesAsMap()
 	if err != nil {
 		log.Println(err)
@@ -54,17 +53,15 @@ func ReceiveOrder2Worker(client worker.JobClient, job entities.Job) {
 		}
 		switch structMsg["$class"].(string) {
 		case "org.sysu.wf.IMCreatedEvent":
-			// get piis
+			// get im
 			processData, err := lib.GetIM("http://127.0.0.1:3001/api/IM/" + structMsg["id"].(string))
 			if err != nil {
-				log.Println(err)
-				lib.FailJob(client, job)
-				return
+				continue
 			}
-			// TODO: check id of middleman
-			if !(processData.Payload.WorkflowRelevantData.To.IESMID == iesmid && processData.Payload.WorkflowRelevantData.To.ProcessID == processID) {
-				payload["fromProcessInstanceID"].(map[string]string)["special-carrier"] = processData.Payload.WorkflowRelevantData.From.ProcessInstanceID
+			if !(processData.Payload.WorkflowRelevantData.To.IESMID == iesmid && processData.Payload.WorkflowRelevantData.To.ProcessID == processID && processData.Payload.WorkflowRelevantData.To.ProcessInstanceID == payload["processInstanceID"]) {
+				break
 			}
+			payload["fromProcessInstanceID"].(map[string]interface{})["special-carrier"] = processData.Payload.WorkflowRelevantData.From.ProcessInstanceID
 			// create piis
 			id := lib.GenerateXID()
 			newPIIS := types.PIIS{
@@ -96,7 +93,7 @@ func ReceiveOrder2Worker(client worker.JobClient, job entities.Job) {
 			finished = true
 		}
 		if finished {
-			fmt.Println("Send PIIS success.")
+			log.Println("Send PIIS success.")
 			break
 		}
 	}
